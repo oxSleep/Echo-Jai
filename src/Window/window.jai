@@ -1,13 +1,8 @@
 #if OS == .WINDOWS
 {
-    #load "win32.jai";
+    #load "../Window/win32.jai";
     Window_Handle :: HWND;
 }
-
-#scope_module;
-
-#import "Basic";
-#import "Flat_Pool";
 
 Modifiers :: enum_flags u8
 {
@@ -86,10 +81,3 @@ Event :: struct
     right_sided: bool;
     mouse_position: [2]int;
 }
-
-Event_Pool :: struct
-{
-    pool: Flat_Pool;
-    events: [..] Event;
-}
-

@@ -1,5 +1,11 @@
 open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 {
+    if state == null
+    {
+        arena := create_heap(arena_allocator);
+        state = New(State,, arena);
+        state.events.allocator = arena;
+    }
     error     := GetLastError();
     hinstance := GetModuleHandleW(null);
 
@@ -36,9 +42,7 @@ open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 
 get_events :: () -> [] Event
 {
-    if state.events.allocator.proc == null state.events.allocator = Allocator.{flat_pool_allocator_proc, *state.pool};
     array_reset_keeping_memory(*state.events);
-    reset(*state.pool);
     while true
     {
         message: MSG;
@@ -50,23 +54,23 @@ get_events :: () -> [] Event
     return state.events;
 }
 
-rect_from_window :: (window: Window_Handle) -> Rng2
+rect_from_window :: (window: Window_Handle) -> Rng2u
 {
-    result: Rng2;
+    result: Rng2u;
     {
         rect: RECT;
         GetClientRect(window, *rect);
-        result.x0 = cast(f32)rect.left;
-        result.x1 = cast(f32)rect.right;
-        result.y0 = cast(f32)rect.top;
-        result.y1 = cast(f32)rect.bottom;
+        result.x0 = cast(u32)rect.left;
+        result.x1 = cast(u32)rect.right;
+        result.y0 = cast(u32)rect.top;
+        result.y1 = cast(u32)rect.bottom;
     }
     return result;
 }
 
 #scope_file
 
-WINDOW_CLASS_NAME :: "Jai-Window-Class";
+WINDOW_CLASS_NAME :: "IGNOREME";
 WINDOWED_STYLE : u32 : WS_OVERLAPPEDWINDOW;
 
 key_from_vkey :: (wParam: WPARAM) -> Key
@@ -86,10 +90,11 @@ WndProc :: (hWnd: HWND, message: u32, wParam: WPARAM, lParam: LPARAM) -> s64 #c_
             case WM_CLOSE; #through;
             case WM_QUIT;  #through;
             case WM_DESTROY;
+            {
                 event: Event;
                 event.kind = .Quit;
                 array_add(*state.events, event);
-
+            }
             case WM_LBUTTONUP; #through;
             case WM_MBUTTONUP; #through;
             case WM_RBUTTONUP; release = true; #through;
@@ -121,8 +126,8 @@ WndProc :: (hWnd: HWND, message: u32, wParam: WPARAM, lParam: LPARAM) -> s64 #c_
             case WM_KEYDOWN; #through;
             case WM_KEYUP;
             {
-                was_down := (lParam & 0x40000000) != 0;
-                is_down  := (lParam & 0x80000000) == 0;
+                was_down := (lParam & 0x40000000);
+                is_down  := !(lParam & 0x80000000);
                 is_repeat := false;
                 if !is_down release = true; else if was_down is_repeat = true;
 
@@ -278,11 +283,11 @@ Key_Table :: #run -> [256]Key
 
 State :: struct
 {
+    events: [..] Event;
     hwnd: HWND;
     hdc: HDC;
-    using event_list: Event_Pool;
 }
-state: State;
+state: *State;
 
 #import "Windows";
 #import "Windows_Utf8";

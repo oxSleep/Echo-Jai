@@ -1,313 +1,181 @@
-#module_parameters (ARENA_FREE_LIST := true);
-
-alloc :: (reserve_size := ARENA_DEFAULT_RESERVE_SIZE, commit_size := ARENA_DEFAULT_COMMIT_SIZE, flags := ARENA_DEFAULT_FLAGS) -> *Arena
+Arena :: struct
 {
-    reserve_size;
-    commit_size;
+    pos: s64;
+    cmt: s64;
+    res: s64;
+    commit_granularity: s64;
+}
 
-    PAGE_SIZE :: 4096;  // Think about using bigger pages here.
-    reserve_size = Align(reserve_size, PAGE_SIZE);
-    commit_size  = Align(commit_size,  PAGE_SIZE);
+arena_make :: (reserve_size := ARENA_DEFAULT_RESERVE_SIZE, commit_granularity := ARENA_DEFAULT_COMMIT_GRANULARITY) -> *Arena
+{
+    reserve_size       = Align(reserve_size,       PAGE_SIZE);
+    commit_granularity = Align(commit_granularity, PAGE_SIZE);
 
+    assert(commit_granularity > 0, "Arena commit granularity must be positive.");
+    assert((commit_granularity & (commit_granularity - 1)) == 0, "Arena commit granularity must be a power of two.");
 
-    base := reserve(reserve_size);
-    commit(base, commit_size);
+    base  := cast(*u8)reserve(reserve_size);
+    arena := cast(*Arena)base;
 
-    assert(base != null, "Arena creation failed to allocate.\n");
+    initial_commit := Align(arena_data_begin_offset(), PAGE_SIZE);
+    commit(base, initial_commit);
 
-    arena := cast(*Arena) base;
-
-    arena.prev     = null;
-    arena.current  = arena;
-    arena.flags    = flags;
-    arena.cmt_size = commit_size;
-    arena.res_size = reserve_size;
-    arena.base_pos = 0;
-    arena.pos      = ARENA_HEADER_SIZE;
-    arena.res      = reserve_size;
-    arena.cmt      = commit_size;
+    arena.pos = arena_data_begin_offset();
+    arena.res = reserve_size;
+    arena.cmt = initial_commit;
+    arena.commit_granularity = commit_granularity;
 
     return arena;
 }
 
-release :: (arena: *Arena)
+arena_release :: (arena: *Arena) { release(arena_base(arena)); }
+
+arena_push :: (arena: *Arena, nbytes: s64, alignment := 8) -> *void
 {
-    #if ARENA_FREE_LIST {
-        free_list := arena.free_last;
-    }
+    assert(arena != null);
+    assert(nbytes >= 0);
+    assert(alignment > 0);
+    assert((alignment & (alignment - 1)) == 0, "Arena alignment must be a power of two.");
 
-    n := arena.current;
-    while n != null {
-        prev := n.prev;
-        release(n, n.res);
-        n = prev;
-    }
+    position_pre  := Align(arena.pos, alignment);
+    position_post := nbytes + position_pre;
 
-    #if ARENA_FREE_LIST {
-        n = free_list;
-        while n != null {
-            prev := n.prev;
-            release(n, n.res);
-            n = prev;
-        }
-    }
-}
+    if position_post > arena.res return null;
 
-
-push :: (arena: *Arena, size: s64, align: s64) -> *void
-{
-    current  := arena.current;
-    pos_pre := Align(current.pos, align);
-    pos_pst := pos_pre + size;
-
-    // chain if needed
-    if current.res < pos_pst && !(arena.flags & .NoChain)
+    if arena.cmt < position_post
     {
-        new_block : *Arena;
-        #if ARENA_FREE_LIST
-        {
-            prev_block: *Arena;
-            new_block = arena.free_last;
-            while new_block != null
-            {
-                if new_block.res >= Align(new_block.pos, align) + size
-                {
-                    if prev_block prev_block.prev = new_block.prev;
-                    else arena.free_last = new_block.prev;
-                    arena.free_size -= new_block.res_size;
-                    break;
-                }
-                prev_block = new_block;
-                new_block = new_block.prev;
-            }
-        }
-        if new_block == null
-        {
-            res_size := current.res_size;
-            cmt_size := current.cmt_size;
-
-            if size + ARENA_HEADER_SIZE > res_size
-            {
-                res_size = Align(size + ARENA_HEADER_SIZE, align);
-                cmt_size = res_size;
-            }
-
-            new_block = alloc(res_size, cmt_size, current.flags);
-        }
-
-        new_block.base_pos = current.base_pos + current.res;
-
-        // push front
-        sll_stack_push_prev(*arena.current, new_block);
-
-        current = new_block;
-        pos_pre = Align(current.pos, align);
-        pos_pst = pos_pre + size;
+        new_committed := Align(position_post, arena.commit_granularity);
+        if new_committed > arena.res new_committed = arena.res;
+        if !commit(arena_base(arena) + arena.cmt, new_committed - arena.cmt) return null;
+        arena.cmt = new_committed;
     }
 
-    // commit if needed
-    if current.cmt < pos_pst
-    {
-        cmt_pst_aligned := pos_pst + current.cmt_size - 1;
-        cmt_pst_aligned -= cmt_pst_aligned % current.cmt_size;
-
-        cmt_pst_clamped := Min(cmt_pst_aligned, current.res);
-        cmt_size        := cmt_pst_clamped - current.cmt;
-
-        cmt_ptr := cast(*u8) current + current.cmt;
-
-        commit(cmt_ptr, cmt_size);
-
-        current.cmt = cmt_pst_clamped;
-    }
-
-    result: *void = null;
-
-    if current.cmt >= pos_pst
-    {
-        result = cast(*u8) current + pos_pre;
-        current.pos = pos_pst;
-    }
-
-    assert(result != null);
-
-    return result;
+    arena.pos = position_post;
+    return arena_base(arena) + position_pre;
 }
 
-pos :: (arena: *Arena) -> s64
+arena_mark   :: (arena: *Arena) -> s64 { return arena.pos - arena_data_begin_offset(); }
+arena_pop_to :: (arena: *Arena, position: s64 = 0)
 {
-    current := arena.current;
-    return current.base_pos + current.pos;
+    target := arena_data_begin_offset() + position;
+    assert(target <= arena.pos, "Failed to rewind the arena from % to %", arena.pos, target);
+    arena.pos = target;
 }
 
-pop_to :: (arena: *Arena, pos: s64)
-{
-    clamped := Max(ARENA_HEADER_SIZE, pos);
-    current := arena.current;
-
-    #if ARENA_FREE_LIST
-    {
-        prev: *Arena;
-        while current.base_pos >= clamped
-        {
-            prev = current.prev;
-            current.pos = ARENA_HEADER_SIZE;
-            arena.free_size += current.res_size;
-
-            sll_stack_push_prev(*arena.free_last, current);
-
-            current = prev;
-        }
-    }
-    else
-    {
-        prev: *Arena;
-        while current.base_pos >= clamped
-        {
-            prev = current.prev;
-            release(current, current.res);
-            current = prev;
-        }
-    }
-
-    arena.current = current;
-
-    new_pos := clamped - current.base_pos;
-    assert(new_pos <= current.pos);
-    current.pos = new_pos;
-}
-
-pop :: (arena: *Arena, amount: s64)
-{
-    old := pos(arena);
-    new := ifx amount < old then old - amount else old;
-    pop_to(arena, new);
-}
-
-clear :: (arena: *Arena)
-{
-    pop_to(arena, 0);
-}
-
-
-PushArray :: inline (arena: *Arena, $T: Type, count: s64, align: s64 = DEFAULT_ALIGNMENT, $zero := true) -> *T
+arena_push_array :: inline (arena: *Arena, $T: Type, count: s64 = 1, align: s64 = 8, $zero := true) -> *T
 {
     size := size_of(T) * count;
-    result := cast(*T) push(arena, cast(s64) size, cast(s64) align);
+    result := cast(*T) arena_push(arena, cast(s64) size, cast(s64) align);
     #if zero {
         memset(result, 0, size_of(T) * count);
     }
     return result;
 }
 
-arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void
+arena_allocator :: Allocator.{arena_allocator_proc, null};
+
+arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void 
 {
-    arena := cast(*Arena) allocator_data;
+    if default_arena_proc == null default_arena_proc = arena_make();
+
+    arena := ifx allocator_data then cast(*Arena)allocator_data else default_arena_proc;
 
     if #complete mode ==
     {
         case .ALLOCATE;
-            assert(arena != null);
             if requested_size <= 0 return null;
-            return push(arena, requested_size, DEFAULT_ALIGNMENT);
-
-        case .RESIZE;
-            assert(arena != null);
-            if requested_size <= 0 return null;
-            if old_memory == null return push(arena, requested_size, DEFAULT_ALIGNMENT);
-            if requested_size <= old_size return old_memory;
-
-            result := push(arena, requested_size, DEFAULT_ALIGNMENT);
-            size_to_copy := Min(old_size, requested_size);
-            if result && size_to_copy > 0
-            {
-                memcpy(result, old_memory, size_to_copy);
-            }
+            result := arena_push(arena, requested_size, 8);
             return result;
 
-        case .FREE;
-            return null;
+        case .RESIZE;
+            if requested_size <= 0 return null;
+            assert(old_size >= 0, "Old size must be non-negative.");
 
-        case .STARTUP; #through;
-        case .SHUTDOWN;
-            return null;
+            // Basic.array_reserve routes first allocation through RESIZE, so treat a null
+            // old pointer as a plain allocate rather than as an error.
+            if old_memory == null return arena_push(arena, requested_size, 8);
 
-        case .THREAD_START; #through;
-        case .THREAD_STOP;
-            assert(false, "Multithreaded access is not supported by arena_allocator_proc.\n");
-            return null;
+            // Shrinking keeps the same pointer and does not reclaim bytes; arena space is
+            // only recovered by rewinding the top of the arena.
+            if requested_size <= old_size return old_memory;
 
-        case .CREATE_HEAP; #through;
-        case .DESTROY_HEAP;
-            assert(false, "Create/Destroy heap are not supported by arena_allocator_proc.\n");
-            return null;
-
-        case .IS_THIS_YOURS;
-            if arena == null || old_memory == null return null;
+            assert(old_memory >= arena_base_after_header(arena) && old_memory < arena_base(arena) + arena.pos, "Tried to resize memory not owned by this arena.");
 
             memory := cast(*u8) old_memory;
-            block := arena.current;
-            while block != null
-            {
-                start := cast(*u8) block + ARENA_HEADER_SIZE;
-                end   := cast(*u8) block + block.pos;
-                if memory >= start && memory < end return cast(*void) 1;
-                block = block.prev;
-            }
+            base := arena_base(arena);
 
+            start := memory - base;
+            old_end := start + old_size;
+            new_end := start + requested_size;
+
+            // Only the most recent allocation may extend in place. Growing anything older
+            // would move arena.pos through newer allocations and corrupt arena order.
+            if old_end == arena.pos
+            {
+                if new_end > arena.res return null;
+                if arena.cmt < new_end
+                {
+                    new_committed := Align(new_end, arena.commit_granularity);
+                    if new_committed > arena.res new_committed = arena.res;
+                    if !commit(arena_base(arena) + arena.cmt, new_committed - arena.cmt) return null;
+                    arena.cmt = new_committed;
+                }
+                if arena.cmt >= new_end
+                {
+                    arena.pos = new_end;
+                    return old_memory;
+                }
+                return null;
+            }
+            // A newer allocation already sits above this one, so preserve arena order by
+            // appending a fresh block and copying the live prefix into it.
+            result := arena_push(arena, requested_size, 8);
+            size_to_copy := ifx old_size < requested_size then old_size else requested_size;
+            if result && size_to_copy  memcpy(result, old_memory, size_to_copy);
+            return result;
+
+        case .CREATE_HEAP;
+            return arena_make();
+
+        case .DESTROY_HEAP;
+            release(arena);
             return null;
 
         case .CAPS;
-            if old_memory
-            {
-                <<cast(*string) old_memory = CAPS_VERSION_STRING;
-            }
-            return cast(*void) (Allocator_Caps.HINT_I_AM_A_FAST_BUMP_ALLOCATOR|.IS_THIS_YOURS);
+            if old_memory {<< cast(*string)old_memory = CAPS_VERSION_STRING;};
+            return cast(*void)(Allocator_Caps.HINT_I_AM_A_FAST_BUMP_ALLOCATOR|.IS_THIS_YOURS|.CREATE_HEAP);
+
+        case .IS_THIS_YOURS;
+            if old_memory == null return null;
+            result := (old_memory >= arena_base_after_header(arena)) && (old_memory < arena_base(arena) + arena.pos);
+            return cast(*void) cast(s64)result;
+
+        case .STARTUP;      #through;
+        case .SHUTDOWN;     #through;
+        case .THREAD_START; #through;
+        case .THREAD_STOP;  #through;
+        case .FREE; return null;
     }
 }
-
-get_allocator :: (arena: *Arena) -> Allocator
-{
-    return .{ arena_allocator_proc, arena };
-}
-
-Arena :: struct
-{
-    prev:    *Arena;
-    current: *Arena;
-    flags: Flags;
-    cmt_size: s64;
-    res_size: s64;
-    base_pos: s64;
-    pos: s64;
-    cmt: s64;
-    res: s64;
-    #if ARENA_FREE_LIST
-    {
-        free_size: s64;
-        free_last: *Arena = null;
-    }
-}
-
 
 #scope_module
 
-ARENA_DEFAULT_RESERVE_SIZE :: #run megabytes(32);
-ARENA_DEFAULT_COMMIT_SIZE  :: #run kilobytes(64);
-ARENA_HEADER_SIZE :: 128;
-ARENA_DEFAULT_FLAGS :Flags: 1;
-DEFAULT_ALIGNMENT :: 16;
-CAPS_VERSION_STRING :: "Echo-Jai Arena";
+default_arena_proc: *Arena;
 
-Flags :: enum_flags u8
-{
-    NoChain :: 1;
-}
+arena_base :: (arena: *Arena) -> *u8 #expand { return cast(*u8)arena; }
+arena_data_begin_offset :: () -> s64 #expand { return Align(size_of(Arena), 8); }
+arena_base_after_header :: (arena: *Arena) -> *u8 #expand { return arena_base(arena) + arena_data_begin_offset(); }
 
+Align :: inline (n: $T, $$ PAGE_SIZE: s64) -> T { return (n + PAGE_SIZE-1) & ~(PAGE_SIZE-1); }
+
+ARENA_DEFAULT_RESERVE_SIZE       :: #run megabytes(32);
+ARENA_DEFAULT_COMMIT_GRANULARITY :: #run kilobytes(64);
+CAPS_VERSION_STRING              :: "Arena";
 
 #if OS == .WINDOWS
 {
     #import "Windows";
+    PAGE_SIZE :: 4096;
     reserve :: (size: s64) -> *void
     {
         result := VirtualAlloc(null, cast(u64)size, MEM_RESERVE, PAGE_READWRITE);
@@ -319,15 +187,8 @@ Flags :: enum_flags u8
         if VirtualAlloc(ptr, cast(u64)size, MEM_COMMIT, PAGE_READWRITE) result = true;
         return result;
     }
-    decommit :: (ptr: *void, size: s64)
-    {
-        VirtualFree(ptr, cast(u64)size, MEM_DECOMMIT);
-    }
-    release :: (ptr: *void, size: s64)
-    {
-        VirtualFree(ptr, 0, MEM_RELEASE);
-    }
-} else assert(false, "Platform not supported.");
+    release :: (ptr: *void) { VirtualFree(ptr, 0, MEM_RELEASE); }
+}
 
 #import "Base";
 #import "Basic";
