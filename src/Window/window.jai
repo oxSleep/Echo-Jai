@@ -1,10 +1,7 @@
 #if OS == .WINDOWS
 {
     #load "win32.jai";
-}
-else
-{
-    assert(false, "Platform not supported.");
+    Window_Handle :: HWND;
 }
 
 #scope_module;
@@ -95,3 +92,4 @@ Event_Pool :: struct
     pool: Flat_Pool;
     events: [..] Event;
 }
+

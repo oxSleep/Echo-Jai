@@ -1,4 +1,4 @@
-open_window :: (width: int, height: int, title := "Jai") -> HWND
+open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 {
     error     := GetLastError();
     hinstance := GetModuleHandleW(null);
@@ -48,6 +48,20 @@ get_events :: () -> [] Event
         DispatchMessageW(*message);
     }
     return state.events;
+}
+
+rect_from_window :: (window: Window_Handle) -> Rng2
+{
+    result: Rng2;
+    {
+        rect: RECT;
+        GetClientRect(window, *rect);
+        result.x0 = cast(f32)rect.left;
+        result.x1 = cast(f32)rect.right;
+        result.y0 = cast(f32)rect.top;
+        result.y1 = cast(f32)rect.bottom;
+    }
+    return result;
 }
 
 #scope_file
