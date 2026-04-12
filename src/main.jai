@@ -4,10 +4,6 @@ main :: ()
     window_equip(window);
     quit := false;
 
-    a := Vec2.{30, 30};
-    b := Vec2.{30, 30};
-    print("%\n", a + b);
-
     while !quit
     {
         reset_temporary_storage();
@@ -23,4 +19,10 @@ main :: ()
     }
 }
 
-#load "base.jai";
+#import "Base";
+#import "Arena";
+
+#load "Window/window.jai";
+#load "Render/render.jai";
+
+backend : Backend : .OPENGL;

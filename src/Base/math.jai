@@ -42,9 +42,3 @@ dim_2f32 :: inline (r: Rng2) -> Vec2
    return result;   
 }
 
-#import "Basic";
-#load "Window/window.jai";
-#load "Render/render.jai";
-
-backend : Backend : .OPENGL;
-
