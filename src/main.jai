@@ -8,6 +8,14 @@ main :: ()
 
     window := open_window(1280, 720);
     window_equip(window);
+
+    font_init();
+    roboto_mono := font_open("data/fonts/Roboto-Regular.ttf");
+    font_metrics_from_font(roboto_mono);
+    result := raster(arena.allocator, roboto_mono, 16.0, 0, "Hello Jai");
+    log("%", result);
+    font_close(roboto_mono);
+
     draw_init();
 
     quit := false;
@@ -21,11 +29,13 @@ main :: ()
         if context.dt > 0.15 context.dt = 0.15;
         last_time = now;
 
-        for get_events()
+        events := get_events();
+        for events
         {
             if it.kind == .Quit || it.key == .Esc then quit = true;
         }
 
+        draw_begin_frame();
         begin_frame(window);
         {
             draw_rect(.{10,  20, 110, 120}, .{.1, .2, .3, 1});
@@ -36,16 +46,17 @@ main :: ()
         sleep_milliseconds(16);
         context.frame += 1;
         context.time += context.dt;
-        reset_temporary_storage();
     }
 }
 
-#import "Basic"()(MEMORY_DEBUGGER = false);
+#import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Base";
-#import "Arena";
+arena :: #import "Arena";
 
 #load "Window/window.jai";
 #load "Render/render.jai";
+#load "draw.jai";
+#load "Font/font.jai";
 
 backend : Backend : .OPENGL;
 

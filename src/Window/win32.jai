@@ -1,11 +1,8 @@
 open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 {
-    if state == null
-    {
-        arena := create_heap(arena_allocator);
-        state = New(State,, arena);
-        state.events.allocator = arena;
-    }
+    // init events array once
+    if context.frame == 0 arena.array_init(*state.events);
+
     error     := GetLastError();
     hinstance := GetModuleHandleW(null);
 
@@ -42,7 +39,7 @@ open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 
 get_events :: () -> [] Event
 {
-    array_reset_keeping_memory(*state.events);
+    arena.array_rewind(*state.events);
     while true
     {
         message: MSG;
@@ -287,7 +284,7 @@ State :: struct
     hwnd: HWND;
     hdc: HDC;
 }
-state: *State;
+state: State;
 
 #import "Windows";
 #import "Windows_Utf8";

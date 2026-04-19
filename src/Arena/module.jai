@@ -1,3 +1,22 @@
+// If no arena is provided, create a new one and store it in the array allocator.
+// You can recover the arena later by casting allocator.data to *Arena.
+array_init :: (array: *[..]$T, arena: *Arena = null)
+{
+    if arena == null arena = make();
+    array.allocator = Allocator.{allocator_proc, arena};
+} 
+
+array_rewind :: (array: *[..] $T)
+{
+    assert(array.allocator.proc == allocator_proc, "array_rewind expects an arena-backed array.");
+
+    arena := cast(*Arena) array.allocator.data;
+    assert(arena != null, "array_rewind requires allocator.data to contain an arena.");
+
+    pop_to(arena);
+    array_reset(array);
+}
+
 Arena :: struct
 {
     pos: s64;
@@ -6,7 +25,7 @@ Arena :: struct
     commit_granularity: s64;
 }
 
-arena_make :: (reserve_size := ARENA_DEFAULT_RESERVE_SIZE, commit_granularity := ARENA_DEFAULT_COMMIT_GRANULARITY) -> *Arena
+make :: (reserve_size := ARENA_DEFAULT_RESERVE_SIZE, commit_granularity := ARENA_DEFAULT_COMMIT_GRANULARITY) -> *Arena
 {
     reserve_size       = Align(reserve_size,       PAGE_SIZE);
     commit_granularity = Align(commit_granularity, PAGE_SIZE);
@@ -17,10 +36,10 @@ arena_make :: (reserve_size := ARENA_DEFAULT_RESERVE_SIZE, commit_granularity :=
     base  := cast(*u8)reserve(reserve_size);
     arena := cast(*Arena)base;
 
-    initial_commit := Align(arena_data_begin_offset(), PAGE_SIZE);
+    initial_commit := Align(data_begin_offset(), PAGE_SIZE);
     commit(base, initial_commit);
 
-    arena.pos = arena_data_begin_offset();
+    arena.pos = data_begin_offset();
     arena.res = reserve_size;
     arena.cmt = initial_commit;
     arena.commit_granularity = commit_granularity;
@@ -28,9 +47,9 @@ arena_make :: (reserve_size := ARENA_DEFAULT_RESERVE_SIZE, commit_granularity :=
     return arena;
 }
 
-arena_release :: (arena: *Arena) { release(arena_base(arena)); }
+release :: (arena: *Arena) { release(base(arena)); }
 
-arena_push :: (arena: *Arena, nbytes: s64, alignment := 8) -> *void
+push :: (arena: *Arena, nbytes: s64, alignment := 8) -> *void
 {
     assert(arena != null);
     assert(nbytes >= 0);
@@ -46,37 +65,37 @@ arena_push :: (arena: *Arena, nbytes: s64, alignment := 8) -> *void
     {
         new_committed := Align(position_post, arena.commit_granularity);
         if new_committed > arena.res new_committed = arena.res;
-        if !commit(arena_base(arena) + arena.cmt, new_committed - arena.cmt) return null;
+        if !commit(base(arena) + arena.cmt, new_committed - arena.cmt) return null;
         arena.cmt = new_committed;
     }
 
     arena.pos = position_post;
-    return arena_base(arena) + position_pre;
+    return base(arena) + position_pre;
 }
 
-arena_mark   :: (arena: *Arena) -> s64 { return arena.pos - arena_data_begin_offset(); }
-arena_pop_to :: (arena: *Arena, position: s64 = 0)
+mark   :: (arena: *Arena) -> s64 { return arena.pos - data_begin_offset(); }
+pop_to :: (arena: *Arena, position: s64 = 0)
 {
-    target := arena_data_begin_offset() + position;
+    target := data_begin_offset() + position;
     assert(target <= arena.pos, "Failed to rewind the arena from % to %", arena.pos, target);
     arena.pos = target;
 }
 
-arena_push_array :: inline (arena: *Arena, $T: Type, count: s64 = 1, align: s64 = 8, $zero := true) -> *T
+push_array :: inline (arena: *Arena, $T: Type, count: s64 = 1, align: s64 = 8, $zero := true) -> *T
 {
     size := size_of(T) * count;
-    result := cast(*T) arena_push(arena, cast(s64) size, cast(s64) align);
+    result := cast(*T) push(arena, cast(s64) size, cast(s64) align);
     #if zero {
         memset(result, 0, size_of(T) * count);
     }
     return result;
 }
 
-arena_allocator :: Allocator.{arena_allocator_proc, null};
+allocator :: Allocator.{allocator_proc, null};
 
-arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void 
+allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s64, old_memory: *void, allocator_data: *void) -> *void 
 {
-    if default_arena_proc == null default_arena_proc = arena_make();
+    if default_arena_proc == null default_arena_proc = make();
 
     arena := ifx allocator_data then cast(*Arena)allocator_data else default_arena_proc;
 
@@ -84,7 +103,7 @@ arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s6
     {
         case .ALLOCATE;
             if requested_size <= 0 return null;
-            result := arena_push(arena, requested_size, 8);
+            result := push(arena, requested_size, 8);
             return result;
 
         case .RESIZE;
@@ -93,18 +112,18 @@ arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s6
 
             // Basic.array_reserve routes first allocation through RESIZE, so treat a null
             // old pointer as a plain allocate rather than as an error.
-            if old_memory == null return arena_push(arena, requested_size, 8);
+            if old_memory == null return push(arena, requested_size, 8);
 
             // Shrinking keeps the same pointer and does not reclaim bytes; arena space is
             // only recovered by rewinding the top of the arena.
             if requested_size <= old_size return old_memory;
 
-            assert(old_memory >= arena_base_after_header(arena) && old_memory < arena_base(arena) + arena.pos, "Tried to resize memory not owned by this arena.");
+            assert(old_memory >= base_after_header(arena) && old_memory < base(arena) + arena.pos, "Tried to resize memory not owned by this arena.");
 
             memory := cast(*u8) old_memory;
-            base := arena_base(arena);
+            arena_base := base(arena);
 
-            start := memory - base;
+            start := memory - arena_base;
             old_end := start + old_size;
             new_end := start + requested_size;
 
@@ -117,7 +136,7 @@ arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s6
                 {
                     new_committed := Align(new_end, arena.commit_granularity);
                     if new_committed > arena.res new_committed = arena.res;
-                    if !commit(arena_base(arena) + arena.cmt, new_committed - arena.cmt) return null;
+                    if !commit(base(arena) + arena.cmt, new_committed - arena.cmt) return null;
                     arena.cmt = new_committed;
                 }
                 if arena.cmt >= new_end
@@ -129,13 +148,13 @@ arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s6
             }
             // A newer allocation already sits above this one, so preserve arena order by
             // appending a fresh block and copying the live prefix into it.
-            result := arena_push(arena, requested_size, 8);
+            result := push(arena, requested_size, 8);
             size_to_copy := ifx old_size < requested_size then old_size else requested_size;
             if result && size_to_copy  memcpy(result, old_memory, size_to_copy);
             return result;
 
         case .CREATE_HEAP;
-            return arena_make();
+            return make();
 
         case .DESTROY_HEAP;
             release(arena);
@@ -147,7 +166,7 @@ arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s6
 
         case .IS_THIS_YOURS;
             if old_memory == null return null;
-            result := (old_memory >= arena_base_after_header(arena)) && (old_memory < arena_base(arena) + arena.pos);
+            result := (old_memory >= base_after_header(arena)) && (old_memory < base(arena) + arena.pos);
             return cast(*void) cast(s64)result;
 
         case .STARTUP;      #through;
@@ -162,9 +181,9 @@ arena_allocator_proc :: (mode: Allocator_Mode, requested_size: s64, old_size: s6
 
 default_arena_proc: *Arena;
 
-arena_base :: (arena: *Arena) -> *u8 #expand { return cast(*u8)arena; }
-arena_data_begin_offset :: () -> s64 #expand { return Align(size_of(Arena), 8); }
-arena_base_after_header :: (arena: *Arena) -> *u8 #expand { return arena_base(arena) + arena_data_begin_offset(); }
+base :: (arena: *Arena) -> *u8 #expand { return cast(*u8)arena; }
+data_begin_offset :: () -> s64 #expand { return Align(size_of(Arena), 8); }
+base_after_header :: (arena: *Arena) -> *u8 #expand { return base(arena) + data_begin_offset(); }
 
 Align :: inline (n: $T, $$ PAGE_SIZE: s64) -> T { return (n + PAGE_SIZE-1) & ~(PAGE_SIZE-1); }
 

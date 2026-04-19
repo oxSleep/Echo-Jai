@@ -59,6 +59,16 @@ Rng2 :: struct(T: Type)
     #place x0; v:   [2]Vec2(T);
 }
 
+operator == :: (a: Rng2($T), b: T) -> bool
+{
+    return a.x0 == b && a.y0 == b && a.x1 == b && a.y1 == b;
+}
+
+operator != :: (a: Rng2($T), b: T) -> bool
+{
+    return a.x0 != b || a.y0 != b || a.x1 != b || a.y1 != b;
+}
+
 dim2 :: inline (r: Rng2($T)) -> Vec2(T)
 {
     result: Vec2(T);
