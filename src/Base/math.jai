@@ -16,6 +16,10 @@ Vec2f :: Vec2(f32);
 Vec2s :: Vec2(s32);
 Vec2u :: Vec2(u32);
 
+Vec2s16 :: Vec2(s16);
+Vec2u16 :: Vec2(u16);
+
+
 Vec3 :: struct(T: Type)
 {
     x, y, z: f32;
@@ -27,6 +31,8 @@ Vec3 :: struct(T: Type)
 Vec3f :: Vec3(f32);
 Vec3s :: Vec3(s32);
 Vec3u :: Vec3(u32);
+Vec3s16 :: Vec3(s16);
+Vec3u16 :: Vec3(u16);
 
 Vec4 :: struct(T: Type)
 {
@@ -43,6 +49,8 @@ Vec4 :: struct(T: Type)
 Vec4f :: Vec4(f32);
 Vec4s :: Vec4(s32);
 Vec4u :: Vec4(u32);
+Vec4s16 :: Vec4(s16);
+Vec4u16 :: Vec4(u16);
 
 operator == :: (a: Vec4($T), b: Vec4(T)) -> bool {
     return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
@@ -80,3 +88,5 @@ dim2 :: inline (r: Rng2($T)) -> Vec2(T)
 Rng2f :: Rng2(f32);
 Rng2s :: Rng2(s32);
 Rng2u :: Rng2(u32);
+Rng2s16 :: Rng2(s16);
+Rng2u16 :: Rng2(u16);

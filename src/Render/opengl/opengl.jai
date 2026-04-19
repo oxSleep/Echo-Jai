@@ -35,7 +35,7 @@
 make_texture :: (kind: Resource_Kind, size: Vec2u, format: Texture_Format, data: *void) -> u32
 {
     // init texture array
-    if textures.allocator.proc == null arena.array_init(*textures);
+    if textures.allocator.proc == null arena_array_init(*textures);
 
     texture := array_add(*textures);
     gl_format := ogl_format_from_texture_format(format);

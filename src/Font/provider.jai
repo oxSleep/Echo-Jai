@@ -31,10 +31,11 @@ font_state: *Font_State;
 
 font_init :: ()
 {
-    allocator := create_heap(arena.allocator);
+    allocator := create_heap(arena_allocator);
     font_state = New(Font_State,, allocator);
     font_state.allocator = allocator;
     FT_Init_FreeType(*font_state.library);
+    cache_init();
 }
 
 font_open :: (path: string) -> *Font

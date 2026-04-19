@@ -10,11 +10,7 @@ main :: ()
     window_equip(window);
 
     font_init();
-    roboto_mono := font_open("data/fonts/Roboto-Regular.ttf");
-    font_metrics_from_font(roboto_mono);
-    result := raster(arena.allocator, roboto_mono, 16.0, 0, "Hello Jai");
-    log("%", result);
-    font_close(roboto_mono);
+    roboto_mono := tag_from_path("data/fonts/Roboto-Regular.ttf");
 
     draw_init();
 
@@ -35,6 +31,7 @@ main :: ()
             if it.kind == .Quit || it.key == .Esc then quit = true;
         }
 
+        cache_frame();
         draw_begin_frame();
         begin_frame(window);
         {
@@ -51,7 +48,7 @@ main :: ()
 
 #import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Base";
-arena :: #import "Arena";
+#import "Arena";
 
 #load "Window/window.jai";
 #load "Render/render.jai";

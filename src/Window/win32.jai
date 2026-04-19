@@ -1,7 +1,7 @@
 open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 {
     // init events array once
-    if context.frame == 0 arena.array_init(*state.events);
+    if context.frame == 0 arena_array_init(*state.events);
 
     error     := GetLastError();
     hinstance := GetModuleHandleW(null);
@@ -39,7 +39,7 @@ open_window :: (width: int, height: int, title := "Jai") -> Window_Handle
 
 get_events :: () -> [] Event
 {
-    arena.array_rewind(*state.events);
+    arena_array_rewind(*state.events);
     while true
     {
         message: MSG;

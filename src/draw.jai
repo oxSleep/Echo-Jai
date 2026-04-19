@@ -1,7 +1,7 @@
 draw_begin_frame :: ()
 {
     for batchs array_reset(*it.rects);
-    arena.array_rewind(*batchs);
+    arena_array_rewind(*batchs);
 
     xform_stack_storage[0] = Matrix3_Identity;
     xform_stack = array_view(xform_stack_storage, 0, 1);
@@ -18,7 +18,7 @@ draw_begin_frame :: ()
 
 draw_init :: ()
 {
-    arena.array_init(*batchs);
+    arena_array_init(*batchs);
 }
 
 draw_rect :: (dst: Rng2f, color: Vec4f, corner_radius := 0.0, border_thickness := 0.0, edge_softness := 0.0)
